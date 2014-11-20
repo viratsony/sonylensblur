@@ -4,7 +4,6 @@ import android.app.Activity;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.YuvImage;
 import android.hardware.Camera;
@@ -13,16 +12,15 @@ import android.os.Environment;
 import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
-import android.widget.Toast;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.util.List;
 import java.util.Random;
-import java.util.Timer;
-import java.util.TimerTask;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import utils.Logger;
 import utils.StorageManager;
@@ -38,12 +36,14 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback {
   private int cameraDisplayOrientation = 0;
   private Camera.Parameters cameraParameters;
   private Activity activity;
+  private AtomicInteger frame_count;
 
   public CameraView(Context context, Camera camera) {
     super(context);
     this.camera = camera;
     this.cameraParameters = camera.getParameters();
     this.activity = (CameraActivity) context;
+    this.frame_count = new AtomicInteger(0);
 
     // Install a SurfaceHolder.Callback so we get notified when the
     // underlying surface is created and destroyed.
@@ -91,11 +91,6 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback {
       // ignore: tried to stop a non-existent preview
     }
 
-    // set preview size and make any resize, rotate or
-    // reformatting changes here
-
-
-    // start preview with new settings
     restartPreview();
   }
 
@@ -105,54 +100,28 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback {
 
   }
 
-  private Bitmap rotate(Bitmap in, int angle) {
-    Matrix mat = new Matrix();
-    mat.postRotate(angle);
-    return Bitmap.createBitmap(in, 0, 0, in.getWidth(), in.getHeight(), mat, true);
-  }
-
   private PictureCallback jpegPictureCallback = new PictureCallback() {
 
     @Override
     public void onPictureTaken(byte[] data, Camera camera) {
       Logger.debug("onPictureTaken called");
 
-
       new SavePictureTask().execute(data);
       restartPreview();
-
-
-//      Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
-//      bitmap = rotate(bitmap, 90);
-//      File pictureFile = StorageManager.getOutputMediaFile(StorageManager.MEDIA_TYPE_IMAGE);
-//      if (pictureFile == null){
-//        Logger.debug("Error creating media file, check storage permissions");
-//        return;
-//      }
-//
-//      try {
-//        FileOutputStream fos = new FileOutputStream(pictureFile);
-//        fos.write(data);
-////        bitmap.compress(Bitmap.CompressFormat.JPEG, 100, fos);
-//        fos.flush();
-//        fos.close();
-//        restartPreview();
-//      } catch (FileNotFoundException e) {
-//        Logger.error( "File not found: " + e.getMessage());
-//      } catch (IOException e) {
-//        Logger.error("Error accessing file: " + e.getMessage());
-//      }
     }
   };
 
-//  private PreviewCallback previewCallback = new PreviewCallback() {
-//    @Override
-//    public void onPreviewFrame(byte[] bytes, Camera camera) {
-//      Logger.debug("onPreviewFrame called");
-//      new SavePictureTask().execute(bytes);
-//
-//    }
-//  };
+  private PreviewCallback previewCallback = new PreviewCallback() {
+    @Override
+    public void onPreviewFrame(byte[] bytes, Camera camera) {
+      Logger.debug("onPreviewFrame called");
+      if (frame_count.get() % 20 == 0) {
+        Logger.debug("onPreviewFrame new picture taken");
+        new SavePictureTask().execute(bytes);
+      }
+      frame_count.incrementAndGet();
+    }
+  };
 
   private class SavePictureTask extends AsyncTask<byte[], Void, Void> {
 
@@ -160,53 +129,35 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback {
     protected Void doInBackground(byte[]... bytes) {
       final byte[] data = bytes[0];
 
-//      Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
-//      bitmap = rotate(bitmap, 90);
+      Camera.Size previewSize = camera.getParameters().getPreviewSize();
+      //YuvImage yuvimage=new YuvImage(data, ImageFormat.NV21, previewSize.width, previewSize.height, null);
+      YuvImage yuvimage=new YuvImage(data, camera.getParameters().getPreviewFormat(), previewSize.width, previewSize.height, null);
+      Logger.debug("PG: size & format " + previewSize.width + "x" + previewSize.height + " format:" + camera.getParameters().getPreviewFormat());
 
-      File pictureFile = StorageManager.getOutputMediaFile(StorageManager.MEDIA_TYPE_IMAGE);
-      if (pictureFile == null){
-        Logger.debug("Error creating media file, check storage permissions");
-        return null;
-      }
+      ByteArrayOutputStream baos = new ByteArrayOutputStream();
+      yuvimage.compressToJpeg(new Rect(0, 0, previewSize.width, previewSize.height), 100, baos);
+      //byte[] jdata = baos.toByteArray();
+      //Bitmap bmp = BitmapFactory.decodeByteArray(jdata, 0, jdata.length);
+      Bitmap bmp = BitmapFactory.decodeByteArray(baos.toByteArray(), 0, baos.size());
+      SaveImage(bmp);
 
-      try {
-        FileOutputStream fos = new FileOutputStream(pictureFile);
-        fos.write(data);
-//        bitmap.compress(Bitmap.CompressFormat.JPEG, 100, fos);
-        fos.flush();
-        fos.close();
-        restartPreview();
-      } catch (FileNotFoundException e) {
-        Logger.error( "File not found: " + e.getMessage());
-      } catch (IOException e) {
-        Logger.error("Error accessing file: " + e.getMessage());
-      }
 
-//      Camera.Size previewSize = camera.getParameters().getPreviewSize();
-//      //YuvImage yuvimage=new YuvImage(data, ImageFormat.NV21, previewSize.width, previewSize.height, null);
-//      YuvImage yuvimage=new YuvImage(data, camera.getParameters().getPreviewFormat(), previewSize.width, previewSize.height, null);
-//      Logger.debug("PG: size & format "+previewSize.width+"x"+previewSize.height+" format:"+camera.getParameters().getPreviewFormat());
-//      ByteArrayOutputStream baos = new ByteArrayOutputStream();
-//      yuvimage.compressToJpeg(new Rect(0, 0, previewSize.width, previewSize.height), 100, baos);
-//      //byte[] jdata = baos.toByteArray();
-//      //Bitmap bmp = BitmapFactory.decodeByteArray(jdata, 0, jdata.length);
-//      Bitmap finalBitmap = BitmapFactory.decodeByteArray(baos.toByteArray(), 0, baos.size());
+//      File pictureFile = StorageManager.getOutputMediaFile(StorageManager.MEDIA_TYPE_IMAGE);
+//      if (pictureFile == null){
+//        Logger.debug("Error creating media file, check storage permissions");
+//        return null;
+//      }
 //
-//      String root = Environment.getExternalStorageDirectory().toString();
-//      File myDir = new File(root + "/lens_blur_images");
-//      myDir.mkdirs();
-//
-//      String fname = "Image-" + "recentPic.jpg";
-//      File file = new File (myDir, fname);
-//      if (file.exists ()) file.delete ();
 //      try {
-//        FileOutputStream out = new FileOutputStream(file);
-//        finalBitmap.compress(Bitmap.CompressFormat.JPEG, 100, out);
-//        out.flush();
-//        out.close();
-//
-//      } catch (Exception e) {
-//        e.printStackTrace();
+//        FileOutputStream fos = new FileOutputStream(pictureFile);
+//        fos.write(data);
+//        fos.flush();
+//        fos.close();
+//        restartPreview();
+//      } catch (FileNotFoundException e) {
+//        Logger.error( "File not found: " + e.getMessage());
+//      } catch (IOException e) {
+//        Logger.error("Error accessing file: " + e.getMessage());
 //      }
 
       return null;
@@ -216,7 +167,7 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback {
   private void SaveImage(Bitmap finalBitmap) {
 
     String root = Environment.getExternalStorageDirectory().toString();
-    File myDir = new File(root + "/saved_images2");
+    File myDir = new File(root + "/lensBlur_previewFrame_images");
     myDir.mkdirs();
     Random generator = new Random();
     int n = 10000;
@@ -236,153 +187,31 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback {
   }
 
   private void restartPreview() {
-    try {
-      camera.stopPreview();
-      camera.setPreviewDisplay(this.surfaceHolder);
-//      camera.setPreviewCallback(previewCallback);
-//      camera.setDisplayOrientation(90);
-      camera.startPreview();
-    } catch (IOException e) {
-      Logger.debug("Error starting camera preview: " + e.getMessage());
+    if (camera != null) {
+      try {
+        camera.stopPreview();
+        camera.setPreviewDisplay(this.surfaceHolder);
+        setCameraPreviewSize();
+        camera.setPreviewCallback(previewCallback);
+
+        camera.startPreview();
+      } catch (IOException e) {
+        Logger.error("Error starting camera preview: " + e.getMessage());
+      } catch (RuntimeException e) {
+        Logger.error("Camera has already been released: " + e.getMessage());
+      }
     }
   }
 
-//  /**
-//   * Set the orientation of the UI.
-//   *
-//   * The orientation value should be one of the enumerated screen orientations
-//   * from ActivityInfo, such as SCREEN_ORIENTATION_LANDSCAPE, etc.
-//   *
-//   * @param orientation   The current orientation of the UI.
-//   */
-//  public void setUIOrientation(int orientation) {
-//    switch (orientation) {
-//      case ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE:
-//        // camera preview doesn't need rotation
-//        cameraDisplayOrientation = 0;
-//        return;
-//      case ActivityInfo.SCREEN_ORIENTATION_PORTRAIT:
-//        // camera preview must rotate 90 degrees
-//        cameraDisplayOrientation = 90;
-//        return;
-//      case ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE:
-//        // camera preview must rotate 180 degrees
-//        cameraDisplayOrientation = 180;
-//        return;
-//      case ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT:
-//        // camera preview must rotate 270 degrees
-//        cameraDisplayOrientation = 270;
-//        return;
-//      default:
-//        // default to no orientation on bad value
-//        cameraDisplayOrientation = 0;
-//    }
-//    Logger.debug("cameraDisplayOrientation = " + cameraDisplayOrientation);
-//  }
+  private void setCameraPreviewSize() {
+    // Get the supported preview sizes:
+    Camera.Parameters parameters = camera.getParameters();
+    List<Camera.Size> previewSizes = parameters.getSupportedPreviewSizes();
+    Camera.Size previewSize = previewSizes.get(0);
+    // And set them:
+    parameters.setPreviewSize(previewSize.width, previewSize.height);
+    Logger.debug("previewSize.width: " + previewSize.width + " previewSize.height: " + previewSize.height);
+    camera.setParameters(parameters);
+  }
 
-//  public Point getRealDisplaySize() {
-//    Point size = new Point();
-//    activity.getWindowManager().getDefaultDisplay().getRealSize(size);
-//    return size;
-//  }
-
-//  public static void setCameraDisplayOrientation(Activity activity,
-//                                                 int cameraId, android.hardware.Camera camera) {
-//    android.hardware.Camera.CameraInfo info =
-//        new android.hardware.Camera.CameraInfo();
-//    android.hardware.Camera.getCameraInfo(cameraId, info);
-//    int rotation = activity.getWindowManager().getDefaultDisplay()
-//        .getRotation();
-//    int degrees = 0;
-//    switch (rotation) {
-//      case Surface.ROTATION_0: degrees = 0; break;
-//      case Surface.ROTATION_90: degrees = 90; break;
-//      case Surface.ROTATION_180: degrees = 180; break;
-//      case Surface.ROTATION_270: degrees = 270; break;
-//    }
-//
-//    int result;
-//    if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
-//      result = (info.orientation + degrees) % 360;
-//      result = (360 - result) % 360;  // compensate the mirror
-//    } else {  // back-facing
-//      result = (info.orientation - degrees + 360) % 360;
-//    }
-//    camera.setDisplayOrientation(result);
-//  }
-//  @Override
-//  protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-//    Logger.debug("onMeasure");
-//    try {
-//      Point sourceSize = (cameraDisplayOrientation % 180 == 0) ? new Point(previewSize.height, previewSize.width)
-//          : new Point(previewSize.width, previewSize.height);
-//      Point screenSize = getRealDisplaySize();
-//      Point destSize = ScalingHelper.centerCrop(sourceSize, screenSize);
-//
-//      Logger.debug("onMeasure, setting CameraView size: {" + destSize.x + ", " + destSize.y + "}");
-//      setMeasuredDimension(destSize.x, destSize.y);
-//    } catch (Exception e) {//this may happen when the camera is not obtained
-//      setMeasuredDimension(0, 0);
-//      Logger.debug("Error in onMeasure(): " + e);
-//    }
-//  }
-//
-//  private void startPreview() {
-//    if (camera != null) {
-//      try {
-//        surfaceHolder = getHolder();
-//        surfaceHolder.addCallback(this);
-//        camera.setPreviewDisplay(surfaceHolder);
-//        camera.setDisplayOrientation(cameraDisplayOrientation);
-//        camera.startPreview();
-//      } catch (Exception e) {
-//        // Seen when method called after release().
-//        Logger.debug("Exception starting Preview: " + e);
-//        recoverCamera();
-//      }
-//    }
-//  }
-//  private void recoverCamera() {
-//    stopCamera();
-//  }
-//
-//  /**
-//   * Restart the camera after it has been stopped.
-//   */
-//  public void restartCamera() {
-//    Logger.verbose("restartCamera: ");
-//    camera = cameraHelper.getCameraInstance(cameraId);
-//    if (camera != null) {
-//      initCameraParameters();
-//      // update the preview, this also restarts it
-//      restartPreview();
-//    }
-//  }
-//  /**
-//   * Stop using the camera. Call this when the parent activity
-//   * is paused, to ensure that other apps can use the camera.
-//   */
-//  public void stopCamera() {
-//    Logger.verbose("stopCamera: ");
-//    // release
-//    releaseCamera();
-//    releaseSurface();
-//  }
-//
-//  private void releaseCamera() {
-//    if (camera != null) {
-//      try {
-//        camera.release();
-//      } catch (Exception e) {
-//        Logger.debug("Exception releasing camera: " + e);
-//      }
-//      camera = null; //make mCamera null even if there is exception in release.
-//    }
-//  }
-//  private void releaseSurface() {
-//    if (surfaceHolder != null) {
-//      surfaceHolder.removeCallback(this);
-//      surfaceHolder = null;
-//    }
-//  }
 }
