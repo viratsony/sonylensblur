@@ -3,12 +3,18 @@ package com.sony.viratsingh.lensblursony;
 import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.hardware.Camera;
+import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
+import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
+
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import butterknife.ButterKnife;
 import butterknife.InjectView;
@@ -18,6 +24,11 @@ import static android.view.View.*;
 
 
 public class CameraActivity extends Activity {
+  ///////////////////////////////////////////////////////////////////
+  // CONSTANTS
+  ///////////////////////////////////////////////////////////////////
+  private static final int MAX_PICTURES = 3;
+
 
   ///////////////////////////////////////////////////////////////////
   // UI
@@ -30,21 +41,23 @@ public class CameraActivity extends Activity {
   ///////////////////////////////////////////////////////////////////
   private Camera camera;
   private CameraView cameraView;
+  private boolean captureStarted;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
+    makeFullScreen();
     setContentView(R.layout.activity_camera);
+
     ButterKnife.inject(this);
 
     Logger.plant(new Logger.AndroidTree());
+    captureStarted = false;
   }
 
   @Override
   protected void onResume() {
     super.onResume();
-
-    makeFullScreen();
 
     // Create an instance of Camera
     if (hasCameraHardware()) {
@@ -59,13 +72,18 @@ public class CameraActivity extends Activity {
 
     preview.addView(cameraView);
 
+
     captureButton.setOnClickListener(new OnClickListener() {
       @Override
       public void onClick(View view) {
-        cameraView.takePicture();
+        if (!captureStarted) {
+          captureStarted = true;
+          startPictureTaking();
+        } else {
+          captureStarted = false;
+        }
       }
     });
-
   }
 
   @Override
@@ -112,15 +130,29 @@ public class CameraActivity extends Activity {
   }
 
   private void makeFullScreen() {
-    // Hide notication bar
-    if (Build.VERSION.SDK_INT < 16) {
-      getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
-          WindowManager.LayoutParams.FLAG_FULLSCREEN);
-    } else {
-      getWindow().getDecorView().setSystemUiVisibility(SYSTEM_UI_FLAG_FULLSCREEN);
-    }
+    // Hide the window title.
+    requestWindowFeature(Window.FEATURE_NO_TITLE);
+    // Hide the status bar and other OS-level chrome
+    getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
-    // Hide Action Bar
-    getActionBar().hide();
+  }
+
+  private void startPictureTaking() {
+    final Timer timer = new Timer();
+    final AtomicInteger pictures_taken = new AtomicInteger(0);
+
+    timer.schedule(new TimerTask() {
+      @Override
+      public void run() {
+        if (pictures_taken.get() < MAX_PICTURES) {
+          cameraView.takePicture();
+          pictures_taken.incrementAndGet();
+        } else {
+          timer.cancel();
+          pictures_taken.set(0);
+          captureStarted = false;
+        }
+      }
+    }, 1000, 3000);
   }
 }

@@ -2,21 +2,33 @@ package com.sony.viratsingh.lensblursony;
 
 import android.app.Activity;
 import android.content.Context;
-import android.content.pm.ActivityInfo;
-import android.graphics.Point;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
+import android.graphics.Rect;
+import android.graphics.YuvImage;
 import android.hardware.Camera;
-import android.view.Surface;
+import android.os.AsyncTask;
+import android.os.Environment;
+import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.widget.Toast;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.util.Random;
+import java.util.Timer;
+import java.util.TimerTask;
 
 import utils.Logger;
+import utils.StorageManager;
 
 import static android.hardware.Camera.PictureCallback;
+import static android.hardware.Camera.PreviewCallback;
 
 /** A basic Camera preview class */
 public class CameraView extends SurfaceView implements SurfaceHolder.Callback {
@@ -45,7 +57,7 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback {
   }
 
   public void takePicture() {
-    camera.takePicture(null, null, pictureCallback);
+    camera.takePicture(null, null, jpegPictureCallback);
   }
 
   @Override
@@ -84,13 +96,7 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback {
 
 
     // start preview with new settings
-    try {
-      camera.setPreviewDisplay(this.surfaceHolder);
-      camera.startPreview();
-
-    } catch (Exception e){
-      Logger.debug("Error starting camera preview: " + e.getMessage());
-    }
+    restartPreview();
   }
 
   @Override
@@ -99,32 +105,147 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback {
 
   }
 
-  private PictureCallback pictureCallback = new PictureCallback() {
+  private Bitmap rotate(Bitmap in, int angle) {
+    Matrix mat = new Matrix();
+    mat.postRotate(angle);
+    return Bitmap.createBitmap(in, 0, 0, in.getWidth(), in.getHeight(), mat, true);
+  }
+
+  private PictureCallback jpegPictureCallback = new PictureCallback() {
 
     @Override
     public void onPictureTaken(byte[] data, Camera camera) {
+      Logger.debug("onPictureTaken called");
 
-      File pictureFile = getOutputMediaFile(MEDIA_TYPE_IMAGE);
+
+      new SavePictureTask().execute(data);
+      restartPreview();
+
+
+//      Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
+//      bitmap = rotate(bitmap, 90);
+//      File pictureFile = StorageManager.getOutputMediaFile(StorageManager.MEDIA_TYPE_IMAGE);
+//      if (pictureFile == null){
+//        Logger.debug("Error creating media file, check storage permissions");
+//        return;
+//      }
+//
+//      try {
+//        FileOutputStream fos = new FileOutputStream(pictureFile);
+//        fos.write(data);
+////        bitmap.compress(Bitmap.CompressFormat.JPEG, 100, fos);
+//        fos.flush();
+//        fos.close();
+//        restartPreview();
+//      } catch (FileNotFoundException e) {
+//        Logger.error( "File not found: " + e.getMessage());
+//      } catch (IOException e) {
+//        Logger.error("Error accessing file: " + e.getMessage());
+//      }
+    }
+  };
+
+//  private PreviewCallback previewCallback = new PreviewCallback() {
+//    @Override
+//    public void onPreviewFrame(byte[] bytes, Camera camera) {
+//      Logger.debug("onPreviewFrame called");
+//      new SavePictureTask().execute(bytes);
+//
+//    }
+//  };
+
+  private class SavePictureTask extends AsyncTask<byte[], Void, Void> {
+
+    @Override
+    protected Void doInBackground(byte[]... bytes) {
+      final byte[] data = bytes[0];
+
+//      Bitmap bitmap = BitmapFactory.decodeByteArray(data, 0, data.length);
+//      bitmap = rotate(bitmap, 90);
+
+      File pictureFile = StorageManager.getOutputMediaFile(StorageManager.MEDIA_TYPE_IMAGE);
       if (pictureFile == null){
         Logger.debug("Error creating media file, check storage permissions");
-        return;
+        return null;
       }
 
       try {
         FileOutputStream fos = new FileOutputStream(pictureFile);
         fos.write(data);
+//        bitmap.compress(Bitmap.CompressFormat.JPEG, 100, fos);
+        fos.flush();
         fos.close();
+        restartPreview();
       } catch (FileNotFoundException e) {
         Logger.error( "File not found: " + e.getMessage());
       } catch (IOException e) {
         Logger.error("Error accessing file: " + e.getMessage());
       }
+
+//      Camera.Size previewSize = camera.getParameters().getPreviewSize();
+//      //YuvImage yuvimage=new YuvImage(data, ImageFormat.NV21, previewSize.width, previewSize.height, null);
+//      YuvImage yuvimage=new YuvImage(data, camera.getParameters().getPreviewFormat(), previewSize.width, previewSize.height, null);
+//      Logger.debug("PG: size & format "+previewSize.width+"x"+previewSize.height+" format:"+camera.getParameters().getPreviewFormat());
+//      ByteArrayOutputStream baos = new ByteArrayOutputStream();
+//      yuvimage.compressToJpeg(new Rect(0, 0, previewSize.width, previewSize.height), 100, baos);
+//      //byte[] jdata = baos.toByteArray();
+//      //Bitmap bmp = BitmapFactory.decodeByteArray(jdata, 0, jdata.length);
+//      Bitmap finalBitmap = BitmapFactory.decodeByteArray(baos.toByteArray(), 0, baos.size());
+//
+//      String root = Environment.getExternalStorageDirectory().toString();
+//      File myDir = new File(root + "/lens_blur_images");
+//      myDir.mkdirs();
+//
+//      String fname = "Image-" + "recentPic.jpg";
+//      File file = new File (myDir, fname);
+//      if (file.exists ()) file.delete ();
+//      try {
+//        FileOutputStream out = new FileOutputStream(file);
+//        finalBitmap.compress(Bitmap.CompressFormat.JPEG, 100, out);
+//        out.flush();
+//        out.close();
+//
+//      } catch (Exception e) {
+//        e.printStackTrace();
+//      }
+
+      return null;
     }
-  };
+  }
 
+  private void SaveImage(Bitmap finalBitmap) {
 
+    String root = Environment.getExternalStorageDirectory().toString();
+    File myDir = new File(root + "/saved_images2");
+    myDir.mkdirs();
+    Random generator = new Random();
+    int n = 10000;
+    n = generator.nextInt(n);
+    String fname = "Image-"+ n +".jpg";
+    File file = new File (myDir, fname);
+    if (file.exists ()) file.delete ();
+    try {
+      FileOutputStream out = new FileOutputStream(file);
+      finalBitmap.compress(Bitmap.CompressFormat.JPEG, 100, out);
+      out.flush();
+      out.close();
 
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+  }
 
+  private void restartPreview() {
+    try {
+      camera.stopPreview();
+      camera.setPreviewDisplay(this.surfaceHolder);
+//      camera.setPreviewCallback(previewCallback);
+//      camera.setDisplayOrientation(90);
+      camera.startPreview();
+    } catch (IOException e) {
+      Logger.debug("Error starting camera preview: " + e.getMessage());
+    }
+  }
 
 //  /**
 //   * Set the orientation of the UI.
