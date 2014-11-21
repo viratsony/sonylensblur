@@ -1,31 +1,24 @@
 package com.sony.viratsingh.lensblursony;
 
-import android.app.Activity;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.graphics.YuvImage;
 import android.hardware.Camera;
 import android.os.AsyncTask;
-import android.os.Environment;
-import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.List;
-import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import utils.Logger;
 import utils.StorageManager;
 
-import static android.hardware.Camera.PictureCallback;
 import static android.hardware.Camera.PreviewCallback;
 
 /** A basic Camera preview class */
@@ -35,15 +28,18 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback {
   private Camera camera;
   private int cameraDisplayOrientation = 0;
   private Camera.Parameters cameraParameters;
-  private Activity activity;
-  private AtomicInteger frame_count;
+  private final CameraActivity activity;
+  private final AtomicInteger frame_count;
+  private final AtomicInteger picture_count;
+
+  private String picturesTaken = getResources().getString(R.string.picturesTaken);
 
   public CameraView(Context context, Camera camera) {
     super(context);
-    this.camera = camera;
-    this.cameraParameters = camera.getParameters();
     this.activity = (CameraActivity) context;
+    this.camera = camera;
     this.frame_count = new AtomicInteger(0);
+    this.picture_count = new AtomicInteger(0);
 
     // Install a SurfaceHolder.Callback so we get notified when the
     // underlying surface is created and destroyed.
@@ -52,12 +48,25 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback {
   }
 
   private void setCameraParameters(Camera camera) {
+    cameraParameters = camera.getParameters();
     cameraParameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
+    cameraParameters.setRotation(180);
     camera.setParameters(cameraParameters);
-  }
 
-  public void takePicture() {
-    camera.takePicture(null, null, jpegPictureCallback);
+
+    Logger.info("isAutoExposureLockSupported(): " + cameraParameters.isAutoExposureLockSupported());
+    Logger.info("isAutoWhiteBalanceLockSupported(): " + cameraParameters.isAutoWhiteBalanceLockSupported());
+    Logger.info("isVideoStabilizationSupported(): " + cameraParameters.isVideoStabilizationSupported());
+    Logger.info("getMinExposureCompensation(): " + cameraParameters.getMinExposureCompensation());
+    Logger.info("getMaxExposureCompensation(): " + cameraParameters.getMaxExposureCompensation());
+    List<int[]> fps_range = cameraParameters.getSupportedPreviewFpsRange();
+    for (int[] fps_pair : fps_range) {
+      StringBuilder sb = new StringBuilder();
+      for (int fps : fps_pair) {
+        sb.append(fps + " ");
+      }
+      Logger.info("getSupportedPreviewFpsRange(): " + sb.toString());
+    }
   }
 
   @Override
@@ -88,7 +97,7 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback {
     try {
       camera.stopPreview();
     } catch (Exception e){
-      // ignore: tried to stop a non-existent preview
+    // ignore: tried to stop a non-existent preview
     }
 
     restartPreview();
@@ -97,27 +106,19 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback {
   @Override
   public void surfaceDestroyed(SurfaceHolder surfaceHolder) {
     // empty. Take care of releasing the Camera preview in CameraActivity.
-
   }
-
-  private PictureCallback jpegPictureCallback = new PictureCallback() {
-
-    @Override
-    public void onPictureTaken(byte[] data, Camera camera) {
-      Logger.debug("onPictureTaken called");
-
-      new SavePictureTask().execute(data);
-      restartPreview();
-    }
-  };
 
   private PreviewCallback previewCallback = new PreviewCallback() {
     @Override
     public void onPreviewFrame(byte[] bytes, Camera camera) {
       Logger.debug("onPreviewFrame called");
-      if (frame_count.get() % 20 == 0) {
+      if (frame_count.get() % 30 == 0 && activity.isCaptureStarted()) {
         Logger.debug("onPreviewFrame new picture taken");
         new SavePictureTask().execute(bytes);
+        activity.picturesTakenTextView.setText(picturesTaken + " " + picture_count.incrementAndGet());
+
+        // TODO - Do we want to autoFocus before saving pic? If so, screen pulsates on autoFocus call
+//        autoFocus(bytes);
       }
       frame_count.incrementAndGet();
     }
@@ -126,64 +127,35 @@ public class CameraView extends SurfaceView implements SurfaceHolder.Callback {
   private class SavePictureTask extends AsyncTask<byte[], Void, Void> {
 
     @Override
-    protected Void doInBackground(byte[]... bytes) {
-      final byte[] data = bytes[0];
+    protected Void doInBackground(final byte[]... bytes) {
+      byte[] data = bytes[0];
+      try {
+        Camera.Size previewSize = camera.getParameters().getPreviewSize();
+        YuvImage yuvimage = new YuvImage(data, camera.getParameters().getPreviewFormat(), previewSize.width, previewSize.height, null);
+        Logger.debug("PG: size & format " + previewSize.width + "x" + previewSize.height + " format:" + camera.getParameters().getPreviewFormat());
 
-      Camera.Size previewSize = camera.getParameters().getPreviewSize();
-      //YuvImage yuvimage=new YuvImage(data, ImageFormat.NV21, previewSize.width, previewSize.height, null);
-      YuvImage yuvimage=new YuvImage(data, camera.getParameters().getPreviewFormat(), previewSize.width, previewSize.height, null);
-      Logger.debug("PG: size & format " + previewSize.width + "x" + previewSize.height + " format:" + camera.getParameters().getPreviewFormat());
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        yuvimage.compressToJpeg(new Rect(0, 0, previewSize.width, previewSize.height), 100, baos);
 
-      ByteArrayOutputStream baos = new ByteArrayOutputStream();
-      yuvimage.compressToJpeg(new Rect(0, 0, previewSize.width, previewSize.height), 100, baos);
-      //byte[] jdata = baos.toByteArray();
-      //Bitmap bmp = BitmapFactory.decodeByteArray(jdata, 0, jdata.length);
-      Bitmap bmp = BitmapFactory.decodeByteArray(baos.toByteArray(), 0, baos.size());
-      SaveImage(bmp);
+        Bitmap bmp_unrotated = BitmapFactory.decodeByteArray(baos.toByteArray(), 0, baos.size());
 
+        Matrix matrix = new Matrix();
+        matrix.postRotate(180);
+        matrix.postScale(.5f, .5f);
+        Bitmap bmp_rotated = Bitmap.createBitmap(bmp_unrotated, 0, 0, bmp_unrotated.getWidth(), bmp_unrotated.getHeight(), matrix, true);
 
-//      File pictureFile = StorageManager.getOutputMediaFile(StorageManager.MEDIA_TYPE_IMAGE);
-//      if (pictureFile == null){
-//        Logger.debug("Error creating media file, check storage permissions");
-//        return null;
-//      }
-//
-//      try {
-//        FileOutputStream fos = new FileOutputStream(pictureFile);
-//        fos.write(data);
-//        fos.flush();
-//        fos.close();
-//        restartPreview();
-//      } catch (FileNotFoundException e) {
-//        Logger.error( "File not found: " + e.getMessage());
-//      } catch (IOException e) {
-//        Logger.error("Error accessing file: " + e.getMessage());
-//      }
+        StorageManager.saveImage(bmp_rotated);
+      } catch (RuntimeException e) {
+        Logger.error("Error in AsyncTask CameraView: " + e);
+      }
 
       return null;
     }
   }
 
-  private void SaveImage(Bitmap finalBitmap) {
-
-    String root = Environment.getExternalStorageDirectory().toString();
-    File myDir = new File(root + "/lensBlur_previewFrame_images");
-    myDir.mkdirs();
-    Random generator = new Random();
-    int n = 10000;
-    n = generator.nextInt(n);
-    String fname = "Image-"+ n +".jpg";
-    File file = new File (myDir, fname);
-    if (file.exists ()) file.delete ();
-    try {
-      FileOutputStream out = new FileOutputStream(file);
-      finalBitmap.compress(Bitmap.CompressFormat.JPEG, 100, out);
-      out.flush();
-      out.close();
-
-    } catch (Exception e) {
-      e.printStackTrace();
-    }
+  public void resetPictureCount() {
+    picture_count.set(0);
+    activity.picturesTakenTextView.setText(picturesTaken + " " + picture_count.get());
   }
 
   private void restartPreview() {

@@ -3,18 +3,14 @@ package com.sony.viratsingh.lensblursony;
 import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.hardware.Camera;
-import android.os.AsyncTask;
-import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
-
-import java.util.Timer;
-import java.util.TimerTask;
-import java.util.concurrent.atomic.AtomicInteger;
+import android.widget.TextView;
+import android.widget.Toast;
 
 import butterknife.ButterKnife;
 import butterknife.InjectView;
@@ -22,25 +18,20 @@ import utils.Logger;
 
 import static android.view.View.*;
 
-
 public class CameraActivity extends Activity {
-  ///////////////////////////////////////////////////////////////////
-  // CONSTANTS
-  ///////////////////////////////////////////////////////////////////
-  private static final int MAX_PICTURES = 3;
-
 
   ///////////////////////////////////////////////////////////////////
   // UI
   ///////////////////////////////////////////////////////////////////
   @InjectView(R.id.capture_button) Button captureButton;
-
+  @InjectView(R.id.pictures_taken_textView) TextView picturesTakenTextView;
 
   ///////////////////////////////////////////////////////////////////
   // FIELDS
   ///////////////////////////////////////////////////////////////////
   private Camera camera;
   private CameraView cameraView;
+
   private boolean captureStarted;
 
   @Override
@@ -52,44 +43,67 @@ public class CameraActivity extends Activity {
     ButterKnife.inject(this);
 
     Logger.plant(new Logger.AndroidTree());
-    captureStarted = false;
-  }
 
-  @Override
-  protected void onResume() {
-    super.onResume();
-
-    // Create an instance of Camera
-    if (hasCameraHardware()) {
-      camera = getCameraInstance();
-    }
-
-    // Create Preview view and set it as content of CameraActivity
-    cameraView = new CameraView(this, camera);
-//    cameraView.setUIOrientation(getRequestedOrientation());
-
-    FrameLayout preview = (FrameLayout) findViewById(R.id.camera_preview);
-
-    preview.addView(cameraView);
-
+    createCamera();
 
     captureButton.setOnClickListener(new OnClickListener() {
       @Override
       public void onClick(View view) {
         if (!captureStarted) {
+          if (cameraView != null) {
+            cameraView.resetPictureCount();
+          }
           captureStarted = true;
-          startPictureTaking();
+          captureButton.setText("Stop");
+          Toast.makeText(CameraActivity.this, "capture started", Toast.LENGTH_SHORT).show();
         } else {
           captureStarted = false;
+
+          captureButton.setText("Capture");
+          Toast.makeText(CameraActivity.this, "capture stopped", Toast.LENGTH_SHORT).show();
         }
       }
     });
   }
 
   @Override
+  protected void onResume() {
+    super.onResume();
+
+    if (camera == null) {
+      createCamera();
+    }
+  }
+
+  private void createCamera() {
+    // Create an instance of Camera
+    if (hasCameraHardware()) {
+      camera = getCameraInstance();
+    }
+    createCameraView();
+  }
+
+  private void createCameraView() {
+    // Create Preview view and set it as content of CameraActivity
+    cameraView = new CameraView(this, camera);
+
+    FrameLayout preview = (FrameLayout) findViewById(R.id.camera_preview);
+    preview.addView(cameraView);
+  }
+
+  @Override
   protected void onPause() {
     super.onPause();
+    resetCaptureMode();
     releaseCamera();
+  }
+
+  private void resetCaptureMode() {
+    captureStarted = false;
+    captureButton.setText("Capture");
+    if (cameraView != null) {
+      cameraView.resetPictureCount();
+    }
   }
 
   /** Check if this device has a camera */
@@ -125,10 +139,6 @@ public class CameraActivity extends Activity {
     }
   }
 
-  private void restartCamera() {
-    // TODO - restart the camera
-  }
-
   private void makeFullScreen() {
     // Hide the window title.
     requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -137,22 +147,7 @@ public class CameraActivity extends Activity {
 
   }
 
-  private void startPictureTaking() {
-    final Timer timer = new Timer();
-    final AtomicInteger pictures_taken = new AtomicInteger(0);
-
-    timer.schedule(new TimerTask() {
-      @Override
-      public void run() {
-        if (pictures_taken.get() < MAX_PICTURES) {
-          cameraView.takePicture();
-          pictures_taken.incrementAndGet();
-        } else {
-          timer.cancel();
-          pictures_taken.set(0);
-          captureStarted = false;
-        }
-      }
-    }, 1000, 3000);
+  public boolean isCaptureStarted() {
+    return captureStarted;
   }
 }
